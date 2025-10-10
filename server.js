@@ -4,6 +4,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const protect = require('./middleware/auth')
+const roleProtect = require('./middleware/roleProtect');
 require('dotenv').config();
 
 // Importar la conexión a la base de datos
@@ -153,4 +154,67 @@ app.get('/api/lessons', protect, async (req, res) => {
 // ------------------------------------------
 app.listen(PORT, () => {
     console.log(`Servidor de EduLingo corriendo en http://localhost:${PORT}`);
+});
+
+// En server.js
+
+// ------------------------------------------
+// ENDPOINT: CREACIÓN DE USUARIOS POR ADMIN/PROFESOR
+// ------------------------------------------
+// Solo permitido para Administrador O Profesor
+app.post('/api/admin/users', roleProtect(['Administrador', 'Profesor']), async (req, res) => {
+    const { name, email, password, native_language, learning_language, role } = req.body;
+    
+    // Validar que el rol proporcionado para la creación exista en la DB
+    if (!['Administrador', 'Profesor', 'Alumno'].includes(role)) {
+        return res.status(400).json({ message: 'Rol proporcionado no válido.' });
+    }
+
+    // Lógica para hashear, verificar y guardar en DB (la misma que antes)
+
+    try {
+        // ... (Verificar email, hashear password) ...
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // 3. Insertar el nuevo usuario con el rol especificado
+        const [result] = await db.query(
+            'INSERT INTO users (name, email, password, native_language, learning_language, role) VALUES (?, ?, ?, ?, ?, ?)',
+            [name, email, hashedPassword, native_language, learning_language, role]
+        );
+
+        res.status(201).json({ 
+            message: `Usuario ${role} creado exitosamente.`,
+            userId: result.insertId
+        });
+        // ...
+
+    } catch (error) {
+        console.error('Error al crear usuario de administración:', error);
+        res.status(500).json({ message: 'Error interno del servidor al crear usuario.' });
+    }
+});
+
+// En server.js
+
+// ------------------------------------------
+// ENDPOINT: OBTENER DATOS DEL USUARIO ACTUAL (Para perfil/dashboards)
+// ------------------------------------------
+app.get('/api/users/me', protect, async (req, res) => {
+    // El 'protect' middleware ya nos dio el ID en req.user.id
+    const userId = req.user.id; 
+
+    try {
+        // Obtenemos todos los datos (excepto el password hash)
+        const [rows] = await db.query('SELECT id, name, email, role, native_language, learning_language FROM users WHERE id = ?', [userId]);
+        const user = rows[0];
+
+        if (!user) {
+            return res.status(404).json({ message: 'Usuario no encontrado.' });
+        }
+
+        res.json(user);
+    } catch (error) {
+        console.error('Error al obtener datos del usuario:', error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
+    }
 });
