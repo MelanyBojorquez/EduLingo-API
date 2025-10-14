@@ -103,13 +103,42 @@ app.get('/api/admin/courses/:id', roleProtect(['Administrador']), async (req, re
     const { id } = req.params;
     try {
         const [rows] = await db.query('SELECT * FROM lessons WHERE id = ?', [id]);
+        
         if (rows.length === 0) {
             return res.status(404).json({ message: 'Curso no encontrado.' });
         }
-        res.json({ course: rows[0] });
+        
+        const courseData = rows[0];
+       
+        const rawContent = courseData.content_json;
+         let lessonsArray = [];
+
+        if (rawContent&& typeof rawContent === 'string' && rawContent.startsWith('{')) {
+            try {
+
+                const parsedContent = JSON.parse(rawContent);
+                lessonsArray = parsedContent.lecciones || parsedContent.lessons || [];
+                
+                // 2. EXTRACCIÓN DEL ARRAY DE LECCIONES: Intentamos leer las posibles claves de envoltura
+                // Preferimos 'lessons', que es lo que el Frontend espera como array.
+                lessonsArray = parsedContent.lessons || parsedContent.lecciones || parsedContent.courses || [];
+            } catch (e) {
+                console.error(`Error al parsear content_json para el curso ID ${id}:`, e);
+
+            }
+        }
+        
+        // Enviamos todos los datos del curso, sobrescribiendo content_json con el array 'lessons'
+        const course = {
+            ...courseData,
+            lessons: lessonsArray 
+        };
+        
+        res.json({ course: course });
+        
     } catch (error) {
-        console.error('Error al obtener curso por ID:', error);
-        res.status(500).json({ message: 'Error interno del servidor.' });
+        console.error('Error al obtener curso por ID (General):', error);
+        res.status(500).json({ message: 'Error interno del servidor al obtener curso.' });
     }
 });
 
@@ -139,19 +168,27 @@ app.post('/api/admin/courses', roleProtect(['Administrador']), async (req, res) 
 app.put('/api/admin/courses/:id', roleProtect(['Administrador']), async (req, res) => {
     const { id } = req.params;
     const { title, target_language, objectives, lessons, category } = req.body; 
+    
     if (!title || !category || !target_language || !objectives) {
         return res.status(400).json({ message: 'Todos los campos son obligatorios.' });
     }
+    
     try {
-        const contentJson = JSON.stringify(lessons); 
+
+        const wrappedLessons = { lecciones: lessons }; 
+        const contentJson = JSON.stringify(wrappedLessons); 
+
         const [result] = await db.query(
+            // La consulta SQL es correcta
             'UPDATE lessons SET title = ?, target_language = ?, objectives = ?, content_json = ?, category = ? WHERE id = ?',
             [title, target_language, objectives, contentJson, category, id]
         );
+
         if (result.affectedRows === 0) {
             return res.status(404).json({ message: 'Curso no encontrado para actualizar.' });
         }
         res.json({ message: `Curso ID ${id} actualizado exitosamente.` });
+        
     } catch (error) {
         console.error('Error al actualizar curso:', error);
         res.status(500).json({ message: 'Error interno del servidor.' });
@@ -176,7 +213,7 @@ app.delete('/api/admin/courses/:id', roleProtect(['Administrador']), async (req,
 // --- ENDPOINTS DE ADMIN (Alumnos) ---
 app.get('/api/admin/students', roleProtect(['Administrador']), async (req, res) => {
     try {
-        const [students] = await db.query('SELECT id, name, email, native_language, learning_language FROM users WHERE role = ?', ['Alumno']);
+        const [students] = await db.query('SELECT id, name, email, native_language, learning_language, profile_picture_url FROM users WHERE role = ?', ['Alumno']);
         res.json({ students: students });
     } catch (error) {
         console.error('Error al obtener lista de alumnos:', error);
